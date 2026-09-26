@@ -1,3 +1,10 @@
+"""
+DISCLAIMER: This tool is provided for educational and authorized security testing purposes only.
+Unauthorized access to computer systems is illegal. Users are solely responsible for ensuring 
+they have explicit authorization before scanning any network or device. The authors assume no 
+liability for misuse or damage caused by this tool.
+"""
+
 import re
 import subprocess
 import threading
@@ -43,6 +50,17 @@ def passive_scan(ip: str) -> str:
     """Run a passive scan on a specific IP address using OS detection."""
     result = subprocess.run(
         ["nmap", "-O", ip],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def exploit_scan(ip: str) -> str:
+    """Run a vulnerability/exploit scan using NSE scripts."""
+    result = subprocess.run(
+        ["nmap", "--script", "vuln", ip],
         capture_output=True,
         text=True,
         check=True,
@@ -98,6 +116,9 @@ class NmapApp:
         self.root.title("Nmap Network Scanner")
         self.root.geometry("450x500")
 
+        # Show disclaimer on startup
+        self._show_disclaimer()
+
         input_frame = ttk.Frame(root, padding=10)
         input_frame.pack(fill=tk.X)
 
@@ -130,10 +151,27 @@ class NmapApp:
         self.context_menu = tk.Menu(root, tearoff=0)
         self.context_menu.add_command(label="Port Scan", command=self.on_port_scan)
         self.context_menu.add_command(label="Passive Scan", command=self.on_passive_scan)
+        self.context_menu.add_command(label="Exploit Scan", command=self.on_exploit_scan)
         self.context_menu.add_command(label="Device Info", command=self.on_device_info)
 
         self.selected_ip = None
         self.scan_history = {}
+
+    def _show_disclaimer(self) -> None:
+        """Show disclaimer dialog on startup."""
+        disclaimer_text = (
+            "DISCLAIMER\n\n"
+            "This tool is provided for EDUCATIONAL and AUTHORIZED security testing purposes only.\n\n"
+            "• Unauthorized access to computer systems is ILLEGAL\n"
+            "• You are solely responsible for ensuring you have explicit authorization\n"
+            "  before scanning any network or device\n"
+            "• The authors assume NO liability for misuse or damage\n\n"
+            "By clicking 'I Agree', you acknowledge that you will use this tool responsibly "
+            "and only on systems you own or have permission to test."
+        )
+        result = messagebox.askokcancel("DISCLAIMER - IMPORTANT", disclaimer_text)
+        if not result:
+            self.root.destroy()
 
     def start_scan(self):
         network_range = self.ip_entry.get().strip()
@@ -208,7 +246,7 @@ class NmapApp:
         self.selected_ip = ip
         menu_window = tk.Toplevel(self.root)
         menu_window.title(f"Device Options - {ip}")
-        menu_window.geometry("300x180")
+        menu_window.geometry("300x220")
         menu_window.resizable(False, False)
 
         ttk.Label(menu_window, text=f"IP Address: {ip}", font=("Arial", 10, "bold")).pack(pady=10)
@@ -223,6 +261,12 @@ class NmapApp:
             menu_window,
             text="Passive Scan",
             command=self.on_passive_scan,
+        ).pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(
+            menu_window,
+            text="Exploit Scan",
+            command=self.on_exploit_scan,
         ).pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Button(
@@ -322,6 +366,62 @@ class NmapApp:
             0,
             self._show_scan_results,
             "Passive Scan Results",
+            ip,
+            output,
+            error_message,
+            ports,
+            info,
+        )
+
+    def on_exploit_scan(self) -> None:
+        """Execute vulnerability/exploit scan on the selected device."""
+        if not self.selected_ip:
+            messagebox.showwarning("No Device Selected", "Please select a device first.")
+            return
+
+        warning = messagebox.askyesno(
+            "Exploit Scan Warning",
+            f"WARNING: Exploit scans can be intrusive and may trigger security alerts.\n\n"
+            f"Target IP: {self.selected_ip}\n\n"
+            f"Make sure you have authorization to scan this target.\n\n"
+            f"Continue?",
+        )
+        if not warning:
+            return
+
+        self.status_label.config(text=f"Exploit scanning {self.selected_ip}...")
+        threading.Thread(
+            target=self._exploit_scan_background,
+            args=(self.selected_ip,),
+            daemon=True,
+        ).start()
+
+    def _exploit_scan_background(self, ip: str) -> None:
+        try:
+            output = exploit_scan(ip)
+            error_message = None
+            ports = parse_open_ports(output)
+            info = parse_device_info(output)
+        except FileNotFoundError:
+            output = ""
+            error_message = "Nmap was not found. Make sure it is installed and available on PATH."
+            ports = []
+            info = {}
+        except subprocess.CalledProcessError as error:
+            output = ""
+            error_message = f"Exploit scan failed:\n{error.stderr or error}"
+            ports = []
+            info = {}
+        except Exception as exc:
+            output = ""
+            error_message = str(exc)
+            ports = []
+            info = {}
+
+        self.root.after(
+            0,
+            self._show_scan_results,
+            "Exploit Scan Results",
             ip,
             output,
             error_message,
